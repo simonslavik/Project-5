@@ -1,20 +1,28 @@
-import { Pool, QueryResult } from 'pg';
+import { PrismaClient } from '@prisma/client';
 import { logger } from '../utils/logger';
 
-let pool: Pool;
+// Initialize Prisma Client
+const prisma = new PrismaClient({
+  log: [
+    { level: 'query', emit: 'event' },
+    { level: 'error', emit: 'stdout' },
+    { level: 'warn', emit: 'stdout' },
+  ],
+});
+
+// Log Prisma queries in development
+if (process.env.NODE_ENV !== 'production') {
+  prisma.$on('query' as never, (e: any) => {
+    logger.debug(`Query: ${e.query}`);
+    logger.debug(`Duration: ${e.duration}ms`);
+  });
+}
 
 export async function initDatabase(): Promise<void> {
   try {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-    });
-
     // Test connection
-    const client = await pool.connect();
-    await client.query('SELECT NOW()');
-    client.release();
-
-    logger.info('✅ Database connection established successfully');
+    await prisma.$connect();
+    logger.info('✅ Database connection established successfully (Prisma)');
   } catch (error) {
     logger.error('❌ Database connection failed:', error);
     throw error;
@@ -22,10 +30,8 @@ export async function initDatabase(): Promise<void> {
 }
 
 export async function closeDatabase(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    logger.info('Database connection closed');
-  }
+  await prisma.$disconnect();
+  logger.info('Database connection closed (Prisma)');
 }
 
 // Weather Data Interface
@@ -60,31 +66,23 @@ export interface EventData {
 
 // Insert Weather Data
 export async function insertWeatherData(data: WeatherData): Promise<void> {
-  const query = `
-    INSERT INTO restaurant.weather (
-      time, location, temperature, feels_like, humidity, 
-      pressure, weather_condition, weather_description, 
-      wind_speed, clouds, precipitation, visibility
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-  `;
-
-  const values = [
-    data.time,
-    data.location,
-    data.temperature,
-    data.feels_like,
-    data.humidity,
-    data.pressure,
-    data.weather_condition,
-    data.weather_description,
-    data.wind_speed,
-    data.clouds,
-    data.precipitation || null,
-    data.visibility || null,
-  ];
-
   try {
-    await pool.query(query, values);
+    await prisma.weather.create({
+      data: {
+        time: data.time,
+        location: data.location,
+        temperature: data.temperature,
+        feels_like: data.feels_like,
+        humidity: data.humidity,
+        pressure: data.pressure,
+        weather_condition: data.weather_condition,
+        weather_description: data.weather_description,
+        wind_speed: data.wind_speed,
+        clouds: data.clouds,
+        precipitation: data.precipitation || null,
+        visibility: data.visibility || null,
+      },
+    });
     logger.debug('Weather data inserted successfully');
   } catch (error) {
     logger.error('Failed to insert weather data:', error);
@@ -94,34 +92,28 @@ export async function insertWeatherData(data: WeatherData): Promise<void> {
 
 // Insert Event Data
 export async function insertEventData(data: EventData): Promise<void> {
-  const query = `
-    INSERT INTO restaurant.events (
-      event_id, event_date, event_time, event_name, 
-      event_type, venue, location, distance_km, 
-      impact_score, expected_attendance
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-    ON CONFLICT (event_id) DO UPDATE SET
-      event_date = EXCLUDED.event_date,
-      event_time = EXCLUDED.event_time,
-      impact_score = EXCLUDED.impact_score,
-      expected_attendance = EXCLUDED.expected_attendance
-  `;
-
-  const values = [
-    data.event_id,
-    data.event_date,
-    data.event_time,
-    data.event_name,
-    data.event_type,
-    data.venue,
-    data.location,
-    data.distance_km,
-    data.impact_score,
-    data.expected_attendance || null,
-  ];
-
   try {
-    await pool.query(query, values);
+    await prisma.event.upsert({
+      where: { event_id: data.event_id },
+      update: {
+        event_date: data.event_date,
+        event_time: data.event_time,
+        impact_score: data.impact_score,
+        expected_attendance: data.expected_attendance || null,
+      },
+      create: {
+        event_id: data.event_id,
+        event_date: data.event_date,
+        event_time: data.event_time,
+        event_name: data.event_name,
+        event_type: data.event_type,
+        venue: data.venue,
+        location: data.location,
+        distance_km: data.distance_km,
+        impact_score: data.impact_score,
+        expected_attendance: data.expected_attendance || null,
+      },
+    });
     logger.debug(`Event inserted: ${data.event_name}`);
   } catch (error) {
     logger.error('Failed to insert event data:', error);
@@ -135,26 +127,30 @@ export async function insertCalendarData(
   isHoliday: boolean,
   holidayName: string | null
 ): Promise<void> {
-  const query = `
-    INSERT INTO restaurant.calendar (
-      date, day_of_week, is_weekend, is_holiday, 
-      holiday_name, month, quarter, year
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    ON CONFLICT (date) DO UPDATE SET
-      is_holiday = EXCLUDED.is_holiday,
-      holiday_name = EXCLUDED.holiday_name
-  `;
-
-  const dayOfWeek = date.getDay();
-  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-  const month = date.getMonth() + 1;
-  const quarter = Math.ceil(month / 3);
-  const year = date.getFullYear();
-
-  const values = [date, dayOfWeek, isWeekend, isHoliday, holidayName, month, quarter, year];
-
   try {
-    await pool.query(query, values);
+    const dayOfWeek = date.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    const month = date.getMonth() + 1;
+    const quarter = Math.ceil(month / 3);
+    const year = date.getFullYear();
+
+    await prisma.calendar.upsert({
+      where: { date },
+      update: {
+        is_holiday: isHoliday,
+        holiday_name: holidayName,
+      },
+      create: {
+        date,
+        day_of_week: dayOfWeek,
+        is_weekend: isWeekend,
+        is_holiday: isHoliday,
+        holiday_name: holidayName,
+        month,
+        quarter,
+        year,
+      },
+    });
     logger.debug(`Calendar data inserted for ${date.toISOString().split('T')[0]}`);
   } catch (error) {
     logger.error('Failed to insert calendar data:', error);
@@ -162,10 +158,6 @@ export async function insertCalendarData(
   }
 }
 
-// Get database connection pool (for custom queries)
-export function getPool(): Pool {
-  if (!pool) {
-    throw new Error('Database not initialized. Call initDatabase() first.');
-  }
-  return pool;
-}
+// Export Prisma client for custom queries
+export { prisma };
+export default prisma;

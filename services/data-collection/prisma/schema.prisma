@@ -1,0 +1,73 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["restaurant"]
+}
+
+// Weather data model
+model Weather {
+  id                  Int      @id @default(autoincrement())
+  time                DateTime @default(now())
+  location            String
+  temperature         Float
+  feels_like          Float
+  humidity            Int
+  pressure            Int
+  weather_condition   String
+  weather_description String
+  wind_speed          Float
+  clouds              Int
+  precipitation       Float?
+  visibility          Int?
+
+  @@index([time])
+  @@index([location])
+  @@map("weather")
+  @@schema("restaurant")
+}
+
+// Events data model
+model Event {
+  id                  Int      @id @default(autoincrement())
+  event_id            String   @unique
+  event_date          String
+  event_time          String?
+  event_name          String
+  event_type          String
+  venue               String
+  location            String
+  distance_km         Float
+  impact_score        Float
+  expected_attendance Int?
+  created_at          DateTime @default(now())
+
+  @@index([event_date])
+  @@index([event_type])
+  @@map("events")
+  @@schema("restaurant")
+}
+
+// Calendar data model
+model Calendar {
+  id           Int      @id @default(autoincrement())
+  date         DateTime @unique
+  day_of_week  Int
+  is_weekend   Boolean
+  is_holiday   Boolean
+  holiday_name String?
+  month        Int
+  quarter      Int
+  year         Int
+
+  @@index([date])
+  @@index([is_holiday])
+  @@map("calendar")
+  @@schema("restaurant")
+}
